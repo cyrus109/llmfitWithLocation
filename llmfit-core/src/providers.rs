@@ -3394,10 +3394,7 @@ impl RamaLamaProvider {
             .call()
         else {
             // Server not reachable — fall back to the on-disk store.
-            return match Self::installed_from_store() {
-                Some((set, count)) => (true, set, count),
-                None => (false, HashSet::new(), 0),
-            };
+            return resolve_ramalama_detection(None, Self::installed_from_store());
         };
 
         let server_header = resp
@@ -3416,17 +3413,14 @@ impl RamaLamaProvider {
         if classify_openai_endpoint(server_header.as_deref(), &list)
             == OpenAiEndpointIdentity::LlamaSwap
         {
-            return match Self::installed_from_store() {
-                Some((set, count)) => (true, set, count),
-                None => (false, HashSet::new(), 0),
-            };
+            return resolve_ramalama_detection(None, Self::installed_from_store());
         }
         let count = list.data.len();
         let mut set = HashSet::new();
         for m in list.data {
             insert_ramalama_name(&mut set, &m.id);
         }
-        (true, set, count)
+        resolve_ramalama_detection(Some((set, count)), None)
     }
 
     /// Detect installed models from the local RamaLama store using the CLI,

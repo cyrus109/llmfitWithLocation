@@ -2226,6 +2226,7 @@ impl SystemSpecs {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     fn parse_cpu_name_from_cpuinfo(text: &str) -> Option<String> {
         for key in ["model name", "hardware", "processor", "cpu model", "model"] {
             for line in text.lines() {

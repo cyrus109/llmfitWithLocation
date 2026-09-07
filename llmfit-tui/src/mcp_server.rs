@@ -8,7 +8,7 @@ use llmfit_core::providers::{
     DockerModelRunnerProvider, LlamaCppProvider, LmStudioProvider, MlxProvider, ModelProvider,
     OllamaProvider, RamaLamaProvider, VllmProvider,
 };
-use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,6 @@ pub struct LlmfitMcpServer {
     /// server describes the machine it runs on (issue #969).
     calc_config: Option<CalcConfig>,
     node_name: String,
-    tool_router: ToolRouter<Self>,
 }
 
 #[tool_handler]
@@ -99,7 +98,6 @@ impl LlmfitMcpServer {
             context_limit,
             calc_config,
             node_name,
-            tool_router: Self::tool_router(),
         }
     }
 

@@ -412,11 +412,6 @@ struct HfConfig {
     shared_expert_intermediate_size: Option<u32>,
     #[serde(default)]
     n_shared_experts: Option<u32>,
-    // Expert count naming variants
-    #[serde(default)]
-    n_routed_experts: Option<u32>,
-    #[serde(default)]
-    num_local_experts: Option<u32>,
     // Nested config (Qwen3.5 vision+text models store LLM params under text_config)
     #[serde(default)]
     text_config: Option<Box<HfConfig>>,

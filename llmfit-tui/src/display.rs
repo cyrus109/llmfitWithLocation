@@ -493,21 +493,6 @@ pub fn display_search_results(models: &[&LlmModel], query: &str) {
     println!("{}", table);
 }
 
-// ────────────────────────────────────────────────────────────────────
-// JSON output for machine consumption (OpenClaw skills, scripts, etc.)
-// ────────────────────────────────────────────────────────────────────
-
-/// Serialize system specs to JSON and print to stdout.
-pub fn display_json_system(specs: &SystemSpecs) {
-    let output = serde_json::json!({
-        "system": system_json(specs),
-    });
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output).expect("JSON serialization failed")
-    );
-}
-
 /// Serialize system specs + model fits to JSON and print to stdout.
 pub fn display_json_fits(specs: &SystemSpecs, fits: &[ModelFit]) {
     let models: Vec<serde_json::Value> = fits.iter().map(fit_to_json).collect();

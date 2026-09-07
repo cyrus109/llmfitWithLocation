@@ -252,13 +252,16 @@ pub fn recommend(fit: &ModelFit, specs: &SystemSpecs) -> LmStudioSettings {
             "no gain on CPU".into()
         },
     });
-    s.push(Setting {
-        label: "K / V Cache Quantization",
-        value: if want_kv_quant {
-            "q8_0 / q8_0".into()
+    let kv_value = || -> String {
+        if want_kv_quant {
+            "q8_0".into()
         } else {
             "Off (fp16)".into()
-        },
+        }
+    };
+    s.push(Setting {
+        label: "K Cache Quantization Type",
+        value: kv_value(),
         why: if want_kv_quant {
             format!("halves KV: {ctx_fp16} → {ctx_q8} tokens at ~no quality cost")
         } else if ctx_fp16 >= native {
@@ -266,6 +269,11 @@ pub fn recommend(fit: &ModelFit, specs: &SystemSpecs) -> LmStudioSettings {
         } else {
             "fp16 fits enough context; quantised KV not needed".into()
         },
+    });
+    s.push(Setting {
+        label: "V Cache Quantization Type",
+        value: kv_value(),
+        why: "same type as K; mixed K/V types bring no benefit".into(),
     });
 
     LmStudioSettings { settings: s }
