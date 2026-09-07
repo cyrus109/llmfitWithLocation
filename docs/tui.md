@@ -44,7 +44,7 @@ Launches the interactive terminal UI. Your system specs (CPU, RAM, GPU name, VRA
 | `r`                        | Refresh installed models from runtime providers                       |
 | `l`                        | Show where the selected installed model lives (path per provider)     |
 | `X`                        | Delete the selected installed model (press `y` to confirm)            |
-| `Enter`                    | Toggle detail view for selected model                                 |
+| `Enter`                    | Toggle detail view for selected model (includes recommended LM Studio load settings for this machine) |
 | `PgUp` / `PgDn`            | Scroll by 10                                                          |
 | `g` / `G`                  | Jump to top / bottom                                                  |
 | `q`                        | Quit                                                                  |

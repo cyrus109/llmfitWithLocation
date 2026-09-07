@@ -186,6 +186,8 @@ Keybindings inside the TUI:
 - `X`: Delete the selected installed model from every provider that has it (press `y` to confirm)
 - `Esc`: Clear search / Back
 
+The detail view (`Enter`) also lists **recommended LM Studio load settings for your machine**: context length, GPU offload layers, CPU threads, batch sizes, KV-cache placement and quantization, flash attention, mlock/mmap, and the rest of LM Studio's Load tab, each with a one-line reason derived from the same memory model that ranks the table.
+
 ### Command Line Options
 
 ```sh

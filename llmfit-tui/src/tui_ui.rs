@@ -2207,8 +2207,8 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect, tc: &ThemeColors) {
     }
 
     // Build right-pane content (GGUF sources + notes)
-    let has_right_pane =
-        !fit.model.gguf_sources.is_empty() || !fit.notes.is_empty() || fit.fits_with_turboquant;
+    // Always present: the LM Studio load settings live here.
+    let has_right_pane = true;
 
     // Pre-compute right pane inner width for line-wrapping decisions
     // (45% of area minus 2 border columns)
@@ -2302,6 +2302,35 @@ fn draw_detail(frame: &mut Frame, app: &App, area: Rect, tc: &ThemeColors) {
             Style::default().fg(tc.muted),
         )));
     }
+
+    // ── LM Studio load settings for this machine ──────────────────────
+    if right_lines.len() > 1 {
+        right_lines.push(Line::from(""));
+    }
+    right_lines.push(Line::from(Span::styled(
+        "  ── LM Studio Load Settings (this machine) ──",
+        Style::default().fg(tc.accent),
+    )));
+    right_lines.push(Line::from(""));
+    let rec = llmfit_core::lmstudio_settings::recommend(fit, &app.specs);
+    for setting in &rec.settings {
+        right_lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<32}", setting.label),
+                Style::default().fg(tc.muted),
+            ),
+            Span::styled(setting.value.clone(), Style::default().fg(tc.good).bold()),
+        ]));
+        right_lines.push(Line::from(Span::styled(
+            format!("    {}", setting.why),
+            Style::default().fg(tc.muted),
+        )));
+    }
+    right_lines.push(Line::from(""));
+    right_lines.push(Line::from(Span::styled(
+        "  Estimates from the fit model; tune after a first run.",
+        Style::default().fg(tc.muted),
+    )));
 
     // Track the left pane area for cursor positioning
     let left_area;
@@ -3074,7 +3103,7 @@ fn status_keys_and_mode(app: &App) -> (String, String) {
             };
             (
                 format!(
-                    " S:simulate  A:config  b:benchmarks  I:live-bench  h:help  {}  /:search  f:fit  F:filter  s:sort{}  P:providers  U:use cases  C:caps  R:runtime  q:quit",
+                    " S:simulate  A:config  b:benchmarks  I:live-bench  h:help  {}  /:search  f:fit  a:avail  F:filter  s:sort{}  P:providers  U:use cases  C:caps  R:runtime  q:quit",
                     detail_key, ollama_keys,
                 ),
                 if app.sim_active {

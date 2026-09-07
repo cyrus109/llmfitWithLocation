@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod fit;
 pub mod hardware;
 pub mod hwprofile;
+pub mod lmstudio_settings;
 pub mod models;
 pub mod plan;
 pub mod providers;
