@@ -126,6 +126,7 @@ pub enum InputMode {
     LicensePopup,
     RuntimePopup,
     HelpPopup,
+    LocationPopup,
     Simulation,
     AdvancedConfig,
     DownloadManager,
@@ -963,6 +964,10 @@ pub struct App {
     pub tick_count: u64,
     /// When true, the next 'd' press will confirm and start the download.
     pub confirm_download: bool,
+    /// Lines shown by the `l` location popup for the selected model.
+    pub location_lines: Vec<String>,
+    /// When true, the next 'y' press deletes the selected installed model.
+    pub confirm_delete_installed: bool,
 
     // Download manager view
     pub show_downloads: bool,
@@ -1528,6 +1533,8 @@ impl App {
             download_capability_rx,
             tick_count: 0,
             confirm_download: false,
+            location_lines: Vec::new(),
+            confirm_delete_installed: false,
             show_downloads: false,
             dm_focus: DownloadManagerFocus::History,
             download_history: DownloadHistory::load(),
@@ -3691,6 +3698,93 @@ impl App {
 
     pub fn close_help_popup(&mut self) {
         self.input_mode = InputMode::Normal;
+    }
+
+    // ── Installed model location / deletion ──────────────────────────
+
+    fn selected_installed_locations(&self) -> Vec<llmfit_core::providers::InstalledLocation> {
+        self.selected_fit()
+            .map(|fit| {
+                self.installed
+                    .installed_locations(&fit.model, &self.llamacpp)
+            })
+            .unwrap_or_default()
+    }
+
+    /// `l`: show where every installed copy of the selected model lives.
+    pub fn open_location_popup(&mut self) {
+        let Some(fit) = self.selected_fit() else {
+            return;
+        };
+        let name = fit.model.name.clone();
+        let locs = self.selected_installed_locations();
+        let mut lines = vec![name, String::new()];
+        if locs.is_empty() {
+            lines.push("Not installed in any detected runtime (press d to pull).".to_string());
+        } else {
+            for loc in &locs {
+                lines.push(format!("{}  ({})", loc.provider, loc.tag));
+                lines.push(format!("  {}", loc.display_path()));
+            }
+            lines.push(String::new());
+            lines.push("X: delete these copies".to_string());
+        }
+        self.location_lines = lines;
+        self.input_mode = InputMode::LocationPopup;
+    }
+
+    pub fn close_location_popup(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// `X`: ask before deleting; `y` on the next key confirms.
+    pub fn request_delete_installed(&mut self) {
+        let locs = self.selected_installed_locations();
+        if locs.is_empty() {
+            self.pull_status = Some("Not installed — nothing to delete".to_string());
+            return;
+        }
+        let summary = locs
+            .iter()
+            .map(|l| format!("{}: {}", l.provider, l.tag))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.pull_status = Some(format!(
+            "Delete {summary}?  y:confirm  any other key:cancel"
+        ));
+        self.confirm_delete_installed = true;
+    }
+
+    pub fn cancel_delete_installed(&mut self) {
+        self.confirm_delete_installed = false;
+        self.pull_status = Some("Delete cancelled".to_string());
+    }
+
+    pub fn delete_selected_installed(&mut self) {
+        self.confirm_delete_installed = false;
+        let locs = self.selected_installed_locations();
+        let mut deleted = 0usize;
+        let mut errors = Vec::new();
+        for loc in &locs {
+            let result = if loc.provider == "Ollama" {
+                self.ollama.delete_model(&loc.tag)
+            } else {
+                llmfit_core::providers::delete_installed(loc)
+            };
+            match result {
+                Ok(()) => deleted += 1,
+                Err(e) => errors.push(format!("{}: {e}", loc.provider)),
+            }
+        }
+        self.pull_status = Some(if errors.is_empty() {
+            format!(
+                "Deleted {deleted} installed cop{}",
+                if deleted == 1 { "y" } else { "ies" }
+            )
+        } else {
+            format!("Deleted {deleted}; failed: {}", errors.join("; "))
+        });
+        self.refresh_installed();
     }
 
     // ── Hardware simulation ──────────────────────────────────────────

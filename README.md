@@ -156,6 +156,13 @@ cargo build --release
 # binary is at target/release/llmfit
 ```
 
+Or use the bundled start script, which builds the release binary when needed and launches the TUI (extra arguments are passed through):
+
+```sh
+./start.sh
+./start.sh --json    # any llmfit flag works
+```
+
 ---
 
 ## Usage
@@ -174,6 +181,9 @@ Keybindings inside the TUI:
 - `Tab` / `Shift+Tab`: Switch tabs (Models, System Info, Benchmark)
 - `↑` / `↓` or `k` / `j`: Navigate list items
 - `/`: Filter models by name, family, or quantization
+- `a`: Cycle availability filter (All, GGUF Avail, Installed)
+- `l`: Show where the selected installed model lives (path per provider: Ollama, llama.cpp, MLX, LM Studio, vLLM, Docker, RamaLama)
+- `X`: Delete the selected installed model from every provider that has it (press `y` to confirm)
 - `Esc`: Clear search / Back
 
 ### Command Line Options

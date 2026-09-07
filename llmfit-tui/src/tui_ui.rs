@@ -87,6 +87,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_runtime_popup(frame, app, &tc);
     } else if app.input_mode == InputMode::HelpPopup {
         draw_help_popup(frame, app, &tc);
+    } else if app.input_mode == InputMode::LocationPopup {
+        draw_location_popup(frame, app, &tc);
     } else if app.input_mode == InputMode::Simulation {
         draw_simulation_popup(frame, app, &tc);
     } else if app.input_mode == InputMode::AdvancedConfig {
@@ -455,6 +457,7 @@ fn draw_search_and_filters(frame: &mut Frame, app: &App, area: Rect, tc: &ThemeC
             | InputMode::LicensePopup
             | InputMode::RuntimePopup
             | InputMode::HelpPopup
+            | InputMode::LocationPopup
             | InputMode::Simulation
             | InputMode::AdvancedConfig
             | InputMode::DownloadManager
@@ -3062,7 +3065,10 @@ fn status_keys_and_mode(app: &App) -> (String, String) {
                 } else {
                     "i:installed↑"
                 };
-                format!("  {}  d:pull  D:downloads  r:refresh", installed_key)
+                format!(
+                    "  {}  d:pull  D:downloads  r:refresh  l:location  X:delete",
+                    installed_key
+                )
             } else {
                 String::new()
             };
@@ -3147,6 +3153,10 @@ fn status_keys_and_mode(app: &App) -> (String, String) {
         InputMode::HelpPopup => (
             "  ↑↓/jk:scroll  Esc/h/q:close".to_string(),
             "HELP".to_string(),
+        ),
+        InputMode::LocationPopup => (
+            "  X:delete  Esc/l/q:close".to_string(),
+            "LOCATION".to_string(),
         ),
         InputMode::Simulation => (
             "  Tab/jk:field  type:edit  Enter:apply  Ctrl-R:reset  Esc:close".to_string(),
@@ -3706,6 +3716,8 @@ fn draw_help_popup(frame: &mut Frame, app: &App, tc: &ThemeColors) {
         ("  A", "Advanced configuration"),
         ("  d", "Download/pull model"),
         ("  r", "Refresh installed models"),
+        ("  l", "Show where installed model lives"),
+        ("  X", "Delete installed model (y to confirm)"),
         ("  p", "Plan mode"),
         ("  b", "Community Leaderboard (localmaxxing.com)"),
         (
@@ -3775,6 +3787,61 @@ fn draw_help_popup(frame: &mut Frame, app: &App, tc: &ThemeColors) {
 
     let paragraph = Paragraph::new(visible).block(block);
     frame.render_widget(paragraph, popup_area);
+}
+
+fn draw_location_popup(frame: &mut Frame, app: &App, tc: &ThemeColors) {
+    let area = frame.area();
+    let longest = app
+        .location_lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(20) as u16;
+    let popup_width = (longest + 4).clamp(30, area.width.saturating_sub(4));
+    // Long paths wrap; size the popup by wrapped rows so nothing is clipped.
+    let inner_width = popup_width.saturating_sub(3).max(1) as usize;
+    let wrapped_rows: usize = app
+        .location_lines
+        .iter()
+        .map(|l| (l.chars().count() + 1).div_ceil(inner_width).max(1))
+        .sum();
+    let popup_height = (wrapped_rows as u16 + 2).min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+    frame.render_widget(Clear, popup_area);
+
+    let lines: Vec<Line> = app
+        .location_lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let style = if i == 0 {
+                Style::default().fg(tc.fg).add_modifier(Modifier::BOLD)
+            } else if l.starts_with("  ") {
+                Style::default().fg(tc.good)
+            } else {
+                Style::default().fg(tc.muted)
+            };
+            Line::from(Span::styled(format!(" {l}"), style))
+        })
+        .collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(tc.accent_secondary))
+        .title(" Installed Location ")
+        .title_style(
+            Style::default()
+                .fg(tc.accent_secondary)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        popup_area,
+    );
 }
 
 fn draw_runtime_popup(frame: &mut Frame, app: &App, tc: &ThemeColors) {

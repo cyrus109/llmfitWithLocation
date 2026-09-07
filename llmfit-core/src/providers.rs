@@ -7559,3 +7559,371 @@ mod tests {
         ));
     }
 }
+
+// ── Installed-model locations ────────────────────────────────────────
+//
+// The `is_model_installed_*` checks above answer "is it there?"; these answer
+// "where?" and "how do I remove it?" for the TUI's `l` and `X` keys.
+
+/// One installed copy of a catalog model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledLocation {
+    pub provider: &'static str,
+    /// The provider's own id: Ollama tag, HF repo, GGUF stem, …
+    pub tag: String,
+    /// On-disk path when the provider stores models where we can see them.
+    /// `None` for stores we can only reach through a CLI (Docker, RamaLama).
+    pub path: Option<PathBuf>,
+}
+
+impl InstalledLocation {
+    /// Human-readable location for the status bar / popup.
+    pub fn display_path(&self) -> String {
+        match &self.path {
+            Some(p) => p.display().to_string(),
+            None => format!("managed by {} (no local path exposed)", self.provider),
+        }
+    }
+}
+
+/// Ollama's model store: `$OLLAMA_MODELS` or `~/.ollama/models`.
+pub fn ollama_models_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("OLLAMA_MODELS")
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".ollama")
+        .join("models")
+}
+
+/// Manifest path for an Ollama tag (`llama3.1:8b` →
+/// `<store>/manifests/registry.ollama.ai/library/llama3.1/8b`). Falls back
+/// to the store root when the manifest is not where we expect it.
+pub fn ollama_model_path(tag: &str) -> PathBuf {
+    let store = ollama_models_dir();
+    let (repo, version) = tag.split_once(':').unwrap_or((tag, "latest"));
+    let repo = match repo.matches('/').count() {
+        0 => format!("registry.ollama.ai/library/{repo}"),
+        1 => format!("registry.ollama.ai/{repo}"),
+        _ => repo.to_string(),
+    };
+    let manifest = store.join("manifests").join(repo).join(version);
+    if manifest.exists() { manifest } else { store }
+}
+
+/// Installed Ollama tags that match this catalog model.
+pub fn ollama_installed_tags(
+    hf_name: &str,
+    catalog_params_b: Option<f64>,
+    installed: &HashSet<String>,
+) -> Vec<String> {
+    let candidates = hf_name_to_ollama_candidates(hf_name);
+    let mut tags: Vec<String> = installed
+        .iter()
+        .filter(|name| {
+            name.as_str() == hf_name.to_lowercase()
+                || candidates
+                    .iter()
+                    .any(|c| ollama_installed_matches_candidate(name, c, catalog_params_b))
+        })
+        .cloned()
+        .collect();
+    // `ollama list` reports `name:latest`, and the set also carries the bare
+    // `name` alias; both are one model, so keep only the tagged form.
+    let bare_with_latest: Vec<String> = tags
+        .iter()
+        .filter(|t| !t.contains(':') && tags.contains(&format!("{t}:latest")))
+        .cloned()
+        .collect();
+    tags.retain(|t| !bare_with_latest.contains(t));
+    tags.sort();
+    tags
+}
+
+/// Installed Docker Model Runner ids that match this catalog model.
+pub fn docker_mr_installed_tags(hf_name: &str, installed: &HashSet<String>) -> Vec<String> {
+    let candidates = hf_name_to_docker_mr_candidates(hf_name);
+    let mut tags: Vec<String> = installed
+        .iter()
+        .filter(|name| {
+            candidates
+                .iter()
+                .any(|c| docker_mr_installed_matches(name, c))
+        })
+        .cloned()
+        .collect();
+    tags.sort();
+    tags
+}
+
+/// Installed ids (substring-matched, as the provider's own check does) for
+/// LM Studio / vLLM / RamaLama, which all report HF-style names.
+pub fn substring_installed_tags(candidates: &[String], installed: &HashSet<String>) -> Vec<String> {
+    let mut tags: Vec<String> = installed
+        .iter()
+        .filter(|name| candidates.iter().any(|c| name.contains(c.as_str())))
+        .cloned()
+        .collect();
+    tags.sort();
+    tags
+}
+
+/// The HF hub cache directory (`models--owner--repo`) for a lowercased
+/// `owner/repo` or bare `repo` id, if one is present in any cache location.
+pub fn hf_cache_repo_dir(candidate_lower: &str) -> Option<PathBuf> {
+    let candidate_lower = candidate_lower.to_lowercase();
+    for cache_dir in dirs_hf_cache_all() {
+        let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Some(rest) = name.strip_prefix("models--") else {
+                continue;
+            };
+            let Some((owner, repo)) = rest.split_once("--") else {
+                continue;
+            };
+            let repo = repo.to_lowercase();
+            if repo == candidate_lower
+                || format!("{}/{}", owner.to_lowercase(), repo) == candidate_lower
+            {
+                return Some(entry.path());
+            }
+        }
+    }
+    None
+}
+
+/// Names a GGUF stem may carry for this catalog model — mirrors
+/// [`is_model_installed_llamacpp`], which accepts the repo name with or
+/// without common variant suffixes.
+fn gguf_stem_candidates(hf_name: &str) -> Vec<String> {
+    let repo = hf_name
+        .split('/')
+        .next_back()
+        .unwrap_or(hf_name)
+        .to_lowercase();
+    let stripped = repo
+        .replace("-instruct", "")
+        .replace("-chat", "")
+        .replace("-hf", "")
+        .replace("-it", "");
+    if stripped == repo {
+        vec![repo]
+    } else {
+        vec![repo, stripped]
+    }
+}
+
+fn gguf_stem_matches(path: &Path, candidates: &[String]) -> bool {
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let stem = stem.to_lowercase();
+    if candidates.contains(&stem) {
+        return true;
+    }
+    strip_gguf_quant_suffix(&stem).is_some_and(|base| candidates.contains(&base))
+}
+
+impl LlamaCppProvider {
+    /// GGUF files in the models dir (plus HF-cache GGUF repos) that belong to
+    /// this catalog model.
+    pub fn model_paths_for(&self, hf_name: &str) -> Vec<PathBuf> {
+        let candidates = gguf_stem_candidates(hf_name);
+        let mut paths: Vec<PathBuf> = self
+            .list_gguf_files()
+            .into_iter()
+            .filter(|p| gguf_stem_matches(p, &candidates))
+            .collect();
+        // HF-cache repos count only when they are GGUF repos, mirroring
+        // `scan_hf_cache_for_gguf`; a bare name would also hit MLX dirs.
+        for c in &candidates {
+            for repo in [c.clone(), format!("{c}-gguf")] {
+                if is_likely_gguf_repo(&repo)
+                    && let Some(dir) = hf_cache_repo_dir(&repo)
+                    && !paths.contains(&dir)
+                {
+                    paths.push(dir);
+                }
+            }
+        }
+        paths
+    }
+}
+
+/// LM Studio `<models>/<publisher>/<repo>` directories holding this model.
+///
+/// Walks repo directories rather than GGUF files because LM Studio also
+/// stores MLX models (safetensors, no `.gguf`). Matching is the same
+/// substring rule as the API check, so the dir behind an API-reported model
+/// is found; the user sees the exact directories before any deletion.
+pub fn lmstudio_model_dirs(hf_name: &str) -> Vec<PathBuf> {
+    let Some(root) = lmstudio_models_dir() else {
+        return Vec::new();
+    };
+    let candidates = hf_name_to_lmstudio_candidates(hf_name);
+    let mut dirs = Vec::new();
+    let Ok(publishers) = std::fs::read_dir(&root) else {
+        return dirs;
+    };
+    for publisher in publishers.flatten().filter(|e| e.path().is_dir()) {
+        let pub_name = publisher.file_name().to_string_lossy().to_lowercase();
+        let Ok(repos) = std::fs::read_dir(publisher.path()) else {
+            continue;
+        };
+        for repo in repos.flatten().filter(|e| e.path().is_dir()) {
+            let repo_name = repo.file_name().to_string_lossy().to_lowercase();
+            let full = format!("{pub_name}/{repo_name}");
+            if candidates
+                .iter()
+                .any(|c| repo_name.contains(c.as_str()) || full == *c)
+            {
+                dirs.push(repo.path());
+            }
+        }
+    }
+    dirs.sort();
+    dirs
+}
+
+/// RamaLama's local store (`$RAMALAMA_STORE` or `~/.local/share/ramalama`),
+/// if it exists. Individual models are content-addressed inside it.
+pub fn ramalama_store_dir() -> Option<PathBuf> {
+    let dir = match std::env::var("RAMALAMA_STORE") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => dirs::home_dir()?
+            .join(".local")
+            .join("share")
+            .join("ramalama"),
+    };
+    dir.exists().then_some(dir)
+}
+
+fn run_cli(program: &str, args: &[&str]) -> Result<(), String> {
+    if !command_exists(program) {
+        return Err(format!("{program} not found in PATH"));
+    }
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to run {program}: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(format!("{program} {} failed: {err}", args.join(" ")))
+    }
+}
+
+/// Remove an installed copy. Ollama is handled by the caller via
+/// [`OllamaProvider::delete_model`] because its base URL is per-instance.
+pub fn delete_installed(loc: &InstalledLocation) -> Result<(), String> {
+    match loc.provider {
+        "Docker" => run_cli("docker", &["model", "rm", &loc.tag]),
+        "RamaLama" => run_cli("ramalama", &["rm", &loc.tag]),
+        "Ollama" => Err("Ollama deletion must go through the Ollama API".to_string()),
+        _ => {
+            let Some(path) = &loc.path else {
+                return Err(format!("{}: no local path to delete", loc.provider));
+            };
+            let res = if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+            res.map_err(|e| format!("Failed to delete {}: {e}", path.display()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod installed_location_tests {
+    use super::*;
+
+    #[test]
+    fn ollama_manifest_path_layout() {
+        // Store root is returned when the manifest is absent, so only check
+        // the manifest layout for the three repo shapes.
+        let store = ollama_models_dir();
+        let expect = |tag: &str, rel: &str| {
+            let p = store.join("manifests").join(rel);
+            let got = ollama_model_path(tag);
+            assert!(got == p || got == store, "{tag}: {}", got.display());
+        };
+        expect("llama3.1:8b", "registry.ollama.ai/library/llama3.1/8b");
+        expect("llama3.1", "registry.ollama.ai/library/llama3.1/latest");
+        expect("user/model:q4", "registry.ollama.ai/user/model/q4");
+        expect("hf.co/org/repo-gguf:q4_k_m", "hf.co/org/repo-gguf/q4_k_m");
+    }
+
+    #[test]
+    fn ollama_tags_resolve_to_installed_names() {
+        let mut set = HashSet::new();
+        set.insert("qwen2.5-coder:7b-instruct-q4_k_m".to_string());
+        set.insert("gemma3:4b".to_string());
+        let tags = ollama_installed_tags("Qwen/Qwen2.5-Coder-7B-Instruct", Some(7.6), &set);
+        assert_eq!(tags, vec!["qwen2.5-coder:7b-instruct-q4_k_m".to_string()]);
+
+        // bare alias + `:latest` collapse to the tagged form
+        let mut set = HashSet::new();
+        set.insert("phi4".to_string());
+        set.insert("phi4:latest".to_string());
+        let tags = ollama_installed_tags("microsoft/phi-4", None, &set);
+        assert_eq!(tags, vec!["phi4:latest".to_string()]);
+    }
+
+    #[test]
+    fn gguf_stems_match_with_and_without_quant() {
+        let c = gguf_stem_candidates("Qwen/Qwen2.5-7B-Instruct");
+        assert!(gguf_stem_matches(
+            Path::new("/m/qwen2.5-7b-instruct-Q4_K_M.gguf"),
+            &c
+        ));
+        assert!(gguf_stem_matches(Path::new("/m/Qwen2.5-7B.gguf"), &c));
+        assert!(!gguf_stem_matches(
+            Path::new("/m/qwen2.5-14b-instruct.gguf"),
+            &c
+        ));
+    }
+
+    #[test]
+    fn delete_removes_file_and_dir_paths() {
+        let base = std::env::temp_dir().join(format!("llmfit-loc-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("repo")).unwrap();
+        let file = base.join("m.gguf");
+        std::fs::write(&file, b"x").unwrap();
+        let f = InstalledLocation {
+            provider: "llama.cpp",
+            tag: "m".into(),
+            path: Some(file.clone()),
+        };
+        let d = InstalledLocation {
+            provider: "MLX",
+            tag: "r".into(),
+            path: Some(base.join("repo")),
+        };
+        assert!(delete_installed(&f).is_ok() && !file.exists());
+        assert!(delete_installed(&d).is_ok() && !base.join("repo").exists());
+        assert!(
+            delete_installed(&f).is_err(),
+            "second delete must report the missing file"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn delete_refuses_without_path() {
+        let loc = InstalledLocation {
+            provider: "MLX",
+            tag: "x".into(),
+            path: None,
+        };
+        assert!(delete_installed(&loc).is_err());
+    }
+}

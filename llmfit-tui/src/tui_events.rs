@@ -34,6 +34,7 @@ pub fn handle_events(app: &mut App) -> std::io::Result<bool> {
             InputMode::LicensePopup => handle_license_popup_mode(app, key),
             InputMode::RuntimePopup => handle_runtime_popup_mode(app, key),
             InputMode::HelpPopup => handle_help_popup_mode(app, key),
+            InputMode::LocationPopup => handle_location_popup_mode(app, key),
             InputMode::Simulation => handle_simulation_mode(app, key),
             InputMode::AdvancedConfig => handle_advanced_config_mode(app, key),
             InputMode::DownloadManager => handle_download_manager_mode(app, key),
@@ -61,6 +62,15 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                     app.bench_tests_done, app.bench_tests_total
                 );
             }
+        }
+        return;
+    }
+
+    // Installed-model delete confirmation (X, then y)
+    if app.confirm_delete_installed {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => app.delete_selected_installed(),
+            _ => app.cancel_delete_installed(),
         }
         return;
     }
@@ -174,6 +184,10 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('R') => app.open_runtime_popup(),
         KeyCode::Char('S') => app.open_simulation_popup(),
         KeyCode::Char('h') => app.open_help_popup(),
+
+        // Installed model: where is it / delete it
+        KeyCode::Char('l') => app.open_location_popup(),
+        KeyCode::Char('X') => app.request_delete_installed(),
 
         // Installed-first sort toggle (any provider)
         KeyCode::Char('i')
@@ -494,6 +508,19 @@ fn handle_runtime_popup_mode(app: &mut App, key: KeyEvent) {
 
         KeyCode::Char('a') => app.runtime_popup_select_all(),
 
+        _ => {}
+    }
+}
+
+fn handle_location_popup_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('X') => {
+            app.close_location_popup();
+            app.request_delete_installed();
+        }
+        KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('q') | KeyCode::Enter => {
+            app.close_location_popup()
+        }
         _ => {}
     }
 }

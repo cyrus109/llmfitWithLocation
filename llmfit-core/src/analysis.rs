@@ -169,6 +169,100 @@ impl InstalledIndex {
         }
         out
     }
+
+    /// Every installed copy of this model with its provider tag and, where
+    /// the store is on disk, its path. `llamacpp` supplies the models dir.
+    pub fn installed_locations(
+        &self,
+        model: &LlmModel,
+        llamacpp: &providers::LlamaCppProvider,
+    ) -> Vec<providers::InstalledLocation> {
+        use providers::InstalledLocation as Loc;
+        let name = model.name.as_str();
+        let mut out = Vec::new();
+
+        for tag in providers::ollama_installed_tags(name, model.known_params_b(), &self.ollama) {
+            let path = Some(providers::ollama_model_path(&tag));
+            out.push(Loc {
+                provider: "Ollama",
+                tag,
+                path,
+            });
+        }
+        if providers::is_model_installed_mlx(name, &self.mlx) {
+            let mut cands = providers::hf_name_to_mlx_candidates(name);
+            cands.insert(0, name.to_lowercase());
+            let tag = cands
+                .iter()
+                .find(|c| self.mlx.contains(c.as_str()))
+                .cloned()
+                .unwrap_or_else(|| name.to_lowercase());
+            let path = providers::hf_cache_repo_dir(&tag);
+            out.push(Loc {
+                provider: "MLX",
+                tag,
+                path,
+            });
+        }
+        for path in llamacpp.model_paths_for(name) {
+            let tag = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            out.push(Loc {
+                provider: "llama.cpp",
+                tag,
+                path: Some(path),
+            });
+        }
+        for tag in providers::docker_mr_installed_tags(name, &self.docker_mr) {
+            out.push(Loc {
+                provider: "Docker",
+                tag,
+                path: None,
+            });
+        }
+        let lms_dirs = providers::lmstudio_model_dirs(name);
+        if lms_dirs.is_empty() {
+            let cands = providers::hf_name_to_lmstudio_candidates(name);
+            for tag in providers::substring_installed_tags(&cands, &self.lmstudio) {
+                out.push(Loc {
+                    provider: "LM Studio",
+                    tag,
+                    path: None,
+                });
+            }
+        }
+        for dir in lms_dirs {
+            let tag = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            out.push(Loc {
+                provider: "LM Studio",
+                tag,
+                path: Some(dir),
+            });
+        }
+        let cands = providers::hf_name_to_vllm_candidates(name);
+        for tag in providers::substring_installed_tags(&cands, &self.vllm) {
+            let path = providers::hf_cache_repo_dir(&tag);
+            out.push(Loc {
+                provider: "vLLM",
+                tag,
+                path,
+            });
+        }
+        let cands = providers::hf_name_to_ramalama_candidates(name);
+        for tag in providers::substring_installed_tags(&cands, &self.ramalama) {
+            out.push(Loc {
+                provider: "RamaLama",
+                tag,
+                path: None,
+            });
+        }
+        out
+    }
 }
 
 /// The catalog entries eligible for a ranked fit sweep on this hardware.
