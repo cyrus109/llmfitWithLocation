@@ -9,6 +9,12 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
+# Embed the web dashboard when it has not been built yet (dist/ is gitignored).
+# Without it the binary still works but serves a placeholder page.
+if [ ! -d llmfit-web/dist ] && command -v npm >/dev/null 2>&1; then
+    (cd llmfit-web && npm ci --no-audit --no-fund && npm run build)
+fi
+
 # ponytail: cargo is incremental, so a no-op rebuild costs well under a second.
 cargo build --release -p llmfit
 exec ./target/release/llmfit "$@"
